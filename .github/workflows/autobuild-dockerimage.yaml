@@ -1,0 +1,50 @@
+# This isn't ideal because I'd rather it only run when the tftpd-hpa package
+# is updated, but I don't have a way of determining that.
+
+name: Autoupdate build on base-image change (debian:stable)
+
+on:
+  schedule:
+    - cron:  '42 21 * * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build'
+        required: true
+        default: 'no'
+        type: choice
+        options:
+          - "no"
+          - "yes"
+
+jobs:
+  check:
+    name: check for new release of debian:stable-slim
+    runs-on: ubuntu-latest
+    outputs:
+      needs-updating: ${{ steps.check.outputs.needs-updating }}
+    steps:
+      - name: Check if update available
+        id: check
+        uses: lucacome/docker-image-update-checker@v2.0.0
+        with:
+          base-image: debian:stable-slim
+          image: rfdrake/tftpd-hpa:latest
+          platforms: linux/amd64
+
+  build:
+    name: build new docker image
+    needs: check
+    if: needs.check.outputs.needs-updating == 'true' || github.event.inputs.force_build == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: rfdrake/tftpd-hpa:latest

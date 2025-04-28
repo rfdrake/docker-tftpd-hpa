@@ -1,0 +1,19 @@
+services:
+  tftpd:
+    image: ghcr.io/rfdrake/tftpd-hpa
+    restart: unless-stopped
+    environment:
+      # An interface and a port to listen to. "0.0.0.0" means all interfaces
+      TFTPD_BIND_ADDRESS: "0.0.0.0:1069"
+      # Search the man page for --blocksize to learn more
+      TFTPD_EXTRA_ARGS: '-vvv --blocksize 1468'
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - SYS_CHROOT
+    ports:
+      - 69:1069/udp
+    volumes:
+      - ./tftpboot:/var/lib/tftpboot
