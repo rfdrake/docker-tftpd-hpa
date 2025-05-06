@@ -1,0 +1,98 @@
+name: Autoupdate based on PACKAGE_NAME version change
+
+on:
+  schedule:
+    - cron: '41 6 * * 1'  # Every week at 6:41 AM UTC
+  workflow_dispatch:     # Allow manual trigger
+    inputs:
+      force_build:
+        description: 'Force build'
+        required: true
+        default: 'no'
+        type: choice
+        options:
+          - "no"
+          - "yes"
+
+jobs:
+  check-package:
+    runs-on: ubuntu-latest
+    outputs:
+      rebuild: ${{ steps.version-check.outputs.rebuild }}
+      package_version: ${{ steps.get-version.outputs.package_version }}
+    steps:
+      - name: Set variables
+        run: |
+          echo "PACKAGE_NAME=tftpd-hpa" >> $GITHUB_ENV
+          echo "BASE_IMAGE=debian:stable-slim" >> $GITHUB_ENV
+
+      - name: Pull base image and check package version
+        id: get-version
+        run: |
+          PACKAGE_VERSION=$(docker run --rm $BASE_IMAGE bash -c "apt-get update -qq && apt-cache policy $PACKAGE_NAME" | grep Candidate | awk '{print $2}')
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
+          echo "package_version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Load cached package version (if exists)
+        id: version-check
+        run: |
+          echo "Current version: $PACKAGE_VERSION"
+          if [[ -f ".package_version" ]]; then
+            OLD_VERSION=$(cat .package_version)
+            echo "Previous version: $OLD_VERSION"
+            if [[ "$PACKAGE_VERSION" == "$OLD_VERSION" ]]; then
+              echo "No update needed."
+              echo "rebuild=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          echo "rebuild=true" >> $GITHUB_OUTPUT
+
+  build:
+    name: build new docker image
+    needs: check-package
+    permissions:
+      packages: write
+      contents: write
+    if: needs.check-package.outputs.rebuild == 'true' || github.event.inputs.force_build == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3.6.0
+        with:
+          platforms: arm64
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/rfdrake/tftpd-hpa:latest
+
+      - name: Commit updated version file
+        env:
+          PACKAGE_VERSION: ${{needs.check-package.outputs.package_version}}
+        run: |
+          echo $PACKAGE_VERSION > .package_version
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add .package_version
+          git commit -m "Update cached package version: $PACKAGE_VERSION"
+          git push
