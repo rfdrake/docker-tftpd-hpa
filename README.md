@@ -24,6 +24,11 @@ tftpd is a very stable protocol, but also insecure.  If a new vulnerability is
 found I'd rather the package update immediately rather than wait until someone
 sees it out of date.
 
+.github/workflows/autobuild-dockerimage-package.yaml This workflow has been
+written to only update the docker image if the tftp package changes version.
+This should only happen if stable-slim updates to a new version, or if the
+tftp package has an update.
+
 # Running the container
 
     docker pull ghcr.io/rfdrake/tftpd-hpa
